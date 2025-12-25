@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebSocket Test</title>
+  </head>
+  <body>
+    <h1>WebSocket Test</h1>
+    <ul id="messages"></ul>
+
+    <script>
+      let ws = new WebSocket("ws://localhost:3001");
+
+      ws.onopen = () => {
+        console.log("Connected to WebSocket server");
+        let message = "Hello from client";
+        ws.send(message);
+        console.log("Sent:", message);
+      };
+
+      ws.onmessage = (event) => {
+        let msgList = document.getElementById("messages");
+        let listItem = document.createElement("li");
+        listItem.textContent = "Received: " + event.data;
+        msgList.appendChild(listItem);
+      };
+
+      ws.onerror = (error) => console.error("WebSocket Error:", error);
+      ws.onclose = () => console.log("WebSocket connection closed");
+    </script>
+  </body>
+</html>
