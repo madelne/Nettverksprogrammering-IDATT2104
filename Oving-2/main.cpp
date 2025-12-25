@@ -1,117 +1,39 @@
 #include <iostream>
-#include <thread>
-#include <condition_variable>
-#include <list>
-#include <mutex>
-#include <vector>
-#include <functional>
+#include <asio.hpp>
+#include <asio/awaitable.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/use_awaitable.hpp>
 
+using namespace asio;
 using namespace std;
+using tcp = ip::tcp;
 
-class Workers {
-    bool wait = false;
-    mutex wait_mutex;
-    condition_variable cv;
-    list<function<void()>> functions;
-    int threads;
-    vector<thread> workerThreads;
+string http_response(const string& request) {
+    return "HTTP/1.1 200 OK\r\n",
+           "Content-type: text/html\r\n"
+              "Content-length: " + to_string(request.size()) + "\r\n"
+                "\r\n" + request;
+}
 
-public:
-    Workers(int threads) : threads(threads) {}
+void handleClient(const shared_ptr<asio::ip::tcp::socket> &socket) {
+    try {
+        char buffer[1024] = {0};
+        size_t bytes_read = co_await socket.async_read_some(buffer(buffer, sizeof(buffer)), use_awaitable);
+        string request(buffer, bytes_read);
+        cout << "Received request:\n" << request << endl;
 
-    void start() {
-        for (int i = 0; i < threads; i++) {
-            workerThreads.emplace_back([this] {
-                while (true) {
-                    function<void()> task;
-                    {
-                        unique_lock<mutex> lock(wait_mutex);
-                        cv.wait(lock, [this] { return !functions.empty() || wait; });
+        string response;
 
-                        if (functions.empty() && wait) {
-                            return;
-                        }
-                        task = *functions.begin();
-                        functions.pop_front();
-                    }
-                    if (task) {
-                        task();
-                    }
-                }
-            });
+        if (request.find("GET / ") != string::npos) {
+            response = http_response("<html><body><h1>First page</h1></body></html>");
+        } else if (request.find("GET /page1") != string::npos) {
+            response = http_response("<html><body><h1>Page 1</h1></body></html>");
+        } else if (request.find("GET /page2") != string::npos) {
+            response = http_response("<html><body><h1>Page 2</h1></body></html>");
         }
+
+        co_await async_write(socket, buffer(response), use_awaitable);
+    } catch (exception& e) {
     }
-
-    void post(function<void()> task) {
-        {
-            unique_lock<mutex> lock(wait_mutex);
-            functions.push_back(task);
-            cout << "Task posted" << endl;
-        }
-        cv.notify_one();
-    }
-
-    void post_timeout(function<void()> function, int timeout) {
-        thread([this, function, timeout] {
-            this_thread::sleep_for(chrono::milliseconds(timeout));
-            post(function);
-        }).detach();
-    }
-
-    void stop() {
-        {
-            unique_lock<mutex> lock(wait_mutex);
-            wait = true;
-        }
-        cv.notify_all();
-        for (auto &thread : workerThreads) {
-            if (thread.joinable()) thread.join();
-        }
-    }
-
-    void join() {
-        for (auto &thread : workerThreads) {
-            if (thread.joinable()) thread.join();
-        }
-    }
-
-    ~Workers() {
-        stop();
-    }
-};
-
-int main() {
-    Workers worker_threads(4);
-    Workers event_loop(1);
-
-    worker_threads.start();
-    event_loop.start();
-
-    worker_threads.post([] {
-        cout << "Task A" << endl;
-    });
-
-    worker_threads.post([] {
-        cout << "Task B" << endl;
-    });
-
-    event_loop.post([] {
-        cout << "Task C" << endl;
-    });
-
-    event_loop.post([] {
-        cout << "Task D " << endl;
-    });
-
-    event_loop.post_timeout([] {
-        cout << "Task E (post timeout)" << endl;
-    }, 2000);
-
-    event_loop.post_timeout([] {
-        cout << "Task F (post timeout)" << endl;
-    }, 2000);
-
-    worker_threads.join();
-    event_loop.join();
-    return 0;
 }
